@@ -11,14 +11,16 @@ use tokio::net::{UdpSocket, UdpFramed};
 use tokio_io::codec::BytesCodec;
 use bytes::{Bytes, BytesMut};
 
+use config::Config;
+
 fn _debugf<F: Future<Item = (), Error = ()>>(_: F) {}
 fn _debugs<S: Stream<Item = (Bytes, SocketAddr), Error = ()>>(_: S) {}
 
-pub fn start(local_addr: &str, remote_addr: &str) {
-    println!("Starting proxy...");
+pub fn start(config: &Config) {
+    let local_addr = config.host.parse::<SocketAddr>().unwrap();
+    let remote_addr = "127.0.0.1:30000".parse::<SocketAddr>().unwrap();
 
-    let local_addr = local_addr.parse::<SocketAddr>().unwrap();
-    let remote_addr = remote_addr.parse::<SocketAddr>().unwrap();
+    println!("Starting proxy on {}", local_addr);
 
     let socket = UdpSocket::bind(&local_addr).unwrap();
     let (sink, stream) = UdpFramed::new(socket, BytesCodec::new()).split();
@@ -64,7 +66,7 @@ pub fn start(local_addr: &str, remote_addr: &str) {
             Ok(())
         } else {
             let tx = hashmap.get(&source_addr).unwrap();
-            tx.unbounded_send((msg, source_addr.clone()));
+            tx.unbounded_send((msg, source_addr.clone())).unwrap();
             Ok(())
         }
     })
