@@ -1,7 +1,5 @@
-use std::ops::DerefMut;
 use std::net::SocketAddr;
 use futures::sync::mpsc::{unbounded, UnboundedSender};
-use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::io;
 
@@ -24,16 +22,12 @@ pub fn start(config: &Config) {
     let socket = UdpSocket::bind(&local_addr).unwrap();
     let (sink, stream) = UdpFramed::new(socket, BytesCodec::new()).split();
 
-    let client_map : Arc<Mutex<HashMap<SocketAddr, UnboundedSender<(BytesMut, SocketAddr)>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let client_map : HashMap<SocketAddr, UnboundedSender<(BytesMut, SocketAddr)>> = HashMap::new();
     let (main_tx, main_rx) = unbounded::<(BytesMut, SocketAddr)>();
 
-    let writer_client_map = client_map.clone();
     let remote_addr = config.servers["lobby"].address.parse::<SocketAddr>().unwrap();
 
-    let acceptor = stream.map(move |(msg, source_addr)| {
-        let mut lock = writer_client_map.lock().unwrap();
-        let hashmap = lock.deref_mut();
-
+    let acceptor = stream.map_err(|_| ()).fold(client_map, move |mut hashmap, (msg, source_addr)| {
         if !hashmap.contains_key(&source_addr) {
             let proxy_socket = UdpSocket::bind(&"0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
             let proxy_addr = proxy_socket.local_addr().unwrap();
@@ -59,14 +53,17 @@ pub fn start(config: &Config) {
             tokio::spawn(server_to_client);
             tokio::spawn(client_to_server);
 
-            Ok(())
+            Ok(hashmap)
         } else {
-            let tx = hashmap.get(&source_addr).unwrap();
-            tx.unbounded_send((msg, source_addr.clone())).unwrap();
-            Ok(())
+            {
+                let tx = hashmap.get(&source_addr).unwrap();
+                tx.unbounded_send((msg, source_addr.clone())).unwrap();
+            }
+
+            Ok(hashmap)
         }
     })
-    .for_each(|_: Result<(), ()>| Ok(()));
+    .map(|_| ());
 
     let main_rx = main_rx.map(|(msg, addr)| (msg.freeze(), addr)).map_err(|_| io::Error::new(io::ErrorKind::Other, "Test"));
     let downstream = sink.send_all(main_rx).map_err(|_| ()).map(|_| ());
