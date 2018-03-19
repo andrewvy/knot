@@ -34,7 +34,7 @@ impl Config {
     }
 }
 
-const CONFIG_TOML: &str = r#"
+const CONFIG_TOML: &str = r#"# knot config.toml
 host = "0.0.0.0:30001"
 player_limit = -1
 
