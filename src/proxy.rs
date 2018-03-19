@@ -18,9 +18,8 @@ fn _debugs<S: Stream<Item = (Bytes, SocketAddr), Error = ()>>(_: S) {}
 
 pub fn start(config: &Config) {
     let local_addr = config.host.parse::<SocketAddr>().unwrap();
-    let remote_addr = "127.0.0.1:30000".parse::<SocketAddr>().unwrap();
 
-    println!("Starting proxy on {}", local_addr);
+    info!("Starting proxy on {}", local_addr);
 
     let socket = UdpSocket::bind(&local_addr).unwrap();
     let (sink, stream) = UdpFramed::new(socket, BytesCodec::new()).split();
@@ -29,6 +28,7 @@ pub fn start(config: &Config) {
     let (main_tx, main_rx) = unbounded::<(BytesMut, SocketAddr)>();
 
     let writer_client_map = client_map.clone();
+    let remote_addr = config.servers["lobby"].address.parse::<SocketAddr>().unwrap();
 
     let acceptor = stream.map(move |(msg, source_addr)| {
         let mut lock = writer_client_map.lock().unwrap();
@@ -40,22 +40,18 @@ pub fn start(config: &Config) {
             let (proxy_sink, proxy_stream) = UdpFramed::new(proxy_socket, BytesCodec::new()).split();
             let (client_tx, client_rx) = unbounded::<(BytesMut, SocketAddr)>();
 
-            println!("New client: {:?}", source_addr);
-            println!("Creating proxy to {:?}", remote_addr);
-            println!("Creating temporary socket {:?}", proxy_addr);
+            info!("New client: {}, creating temporary socket {} -> {}", source_addr, proxy_addr, remote_addr);
 
             hashmap.insert(source_addr.clone(), client_tx.clone());
 
             let server_to_client = main_tx.clone().send_all(
-                proxy_stream.map(move |(msg, temp_addr)| {
-                    println!("Server to client packet {:?} -> {:?}", temp_addr, source_addr.clone());
+                proxy_stream.map(move |(msg, _temp_addr)| {
                     (msg, source_addr.clone())
                 }).map_err(|_| panic!())
             ).map_err(|_| ()).map(|_| ());
 
             let client_to_server = proxy_sink.send_all(
-                client_rx.map(move |(msg, addr)| {
-                    println!("Client to server packet sent {:?} -> {:?}", addr.clone(), proxy_addr);
+                client_rx.map(move |(msg, _addr)| {
                     (msg.freeze(), remote_addr.clone())
                 }).map_err(|_| io::Error::new(io::ErrorKind::Other, "Test"))
             ).map_err(|_| ()).map(|_| ());

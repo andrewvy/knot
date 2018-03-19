@@ -5,6 +5,8 @@ extern crate toml;
 extern crate serde;
 
 #[allow(unused_imports)]
+#[macro_use] extern crate log;
+#[allow(unused_imports)]
 #[macro_use] extern crate futures;
 #[allow(unused_imports)]
 #[macro_use] extern crate failure;

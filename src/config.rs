@@ -24,13 +24,23 @@ pub struct Config {
     pub servers: BTreeMap<String, Server>,
 }
 
+impl Config {
+    pub fn validate(&self) -> Result<&Config, Error> {
+        if self.servers.contains_key("lobby") {
+            return Ok(&self);
+        } else {
+            return Err(format_err!("config.toml must contain a lobby server"));
+        }
+    }
+}
+
 const CONFIG_TOML: &str = r#"
 host = "0.0.0.0:30001"
 player_limit = -1
 
 [servers]
   [servers.lobby]
-    address = "localhost:30000"
+    address = "127.0.0.1:30000"
 "#;
 
 pub fn init() {
@@ -38,6 +48,7 @@ pub fn init() {
     let current_path = current_path.as_path();
 
     if !&current_path.join("config.toml").exists() {
+        info!("config.toml not found, creating a default configuration..");
         create_file(&current_path.join("config.toml"), CONFIG_TOML).expect("Could not create config.toml");
     }
 }
