@@ -10,6 +10,7 @@ use tokio_io::codec::BytesCodec;
 use bytes::{Bytes, BytesMut};
 
 use config::Config;
+use packet::packet;
 
 fn _debugf<F: Future<Item = (), Error = ()>>(_: F) {}
 fn _debugs<S: Stream<Item = (Bytes, SocketAddr), Error = ()>>(_: S) {}
@@ -28,6 +29,11 @@ pub fn start(config: &Config) {
     let remote_addr = config.servers["lobby"].address.parse::<SocketAddr>().unwrap();
 
     let acceptor = stream.map_err(|_| ()).fold(client_map, move |mut hashmap, (msg, source_addr)| {
+        {
+            let packet = packet(&msg).to_result().unwrap();
+            info!("Packet: {:?}", packet);
+        }
+
         if !hashmap.contains_key(&source_addr) {
             let proxy_socket = UdpSocket::bind(&"0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
             let proxy_addr = proxy_socket.local_addr().unwrap();

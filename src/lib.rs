@@ -13,6 +13,9 @@ extern crate serde;
 #[allow(unused_imports)]
 #[macro_use] extern crate failure_derive;
 #[macro_use] extern crate serde_derive;
+#[allow(unused_imports)]
+#[macro_use] extern crate nom;
 
 pub mod proxy;
 pub mod config;
+pub mod packet;
