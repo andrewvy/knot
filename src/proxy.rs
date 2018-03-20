@@ -10,7 +10,7 @@ use tokio_io::codec::BytesCodec;
 use bytes::{Bytes, BytesMut};
 
 use config::Config;
-use packet::packet;
+use packet::{DataPacket, packet};
 
 fn _debugf<F: Future<Item = (), Error = ()>>(_: F) {}
 fn _debugs<S: Stream<Item = (Bytes, SocketAddr), Error = ()>>(_: S) {}
@@ -30,8 +30,17 @@ pub fn start(config: &Config) {
 
     let acceptor = stream.map_err(|_| ()).fold(client_map, move |mut hashmap, (msg, source_addr)| {
         {
-            let packet = packet(&msg).to_result().unwrap();
-            info!("Packet: {:?}", packet);
+            match packet(&msg).to_full_result() {
+                Ok(packet) => {
+                    match packet.data_packet {
+                        Some(DataPacket::TOSERVER_INIT { player_name, ..}) => {
+                            info!("New player connected: {}", player_name);
+                        }
+                        _ => {}
+                    }
+                },
+                _ => {}
+            }
         }
 
         if !hashmap.contains_key(&source_addr) {

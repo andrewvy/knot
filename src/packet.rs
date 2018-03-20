@@ -6,6 +6,7 @@ pub struct Packet {
     pub sender_peer_id: u16,
     pub channel: u8,
     pub base_packet: BasePacket,
+    pub data_packet: Option<DataPacket>,
 }
 
 #[derive(Debug)]
@@ -74,13 +75,24 @@ impl From<u8> for ControlPacketType {
     }
 }
 
+#[derive(Debug)]
+#[allow(non_camel_case_types)]
+pub enum DataPacket {
+    TOSERVER_INIT {
+        max_client_serialization_version: u8,
+        supp_compr_modes: u16,
+        min_net_proto_version: u16,
+        max_net_proto_version: u16,
+        player_name: String,
+    }
+}
+
 named!(protocol_id<u32>, call!(be_u32));
 named!(sender_peer_id<u16>, call!(be_u16));
 named!(channel<u8>, call!(be_u8));
 
 named!(control_packet_ack<BasePacket>, do_parse!(
-    tag!([0x00])
-    >> tag!([0x00])
+    tag!([0x00, 0x00])
     >> seqnum: be_u16
     >> (BasePacket::ControlPacket {
         base_packet_type: BasePacketType::CONTROL,
@@ -91,8 +103,7 @@ named!(control_packet_ack<BasePacket>, do_parse!(
 ));
 
 named!(control_packet_set_peer_id<BasePacket>, do_parse!(
-    tag!([0x00])
-    >> tag!([0x01])
+    tag!([0x00, 0x01])
     >> peer_id_new: be_u16
     >> (BasePacket::ControlPacket {
         base_packet_type: BasePacketType::CONTROL,
@@ -103,8 +114,7 @@ named!(control_packet_set_peer_id<BasePacket>, do_parse!(
 ));
 
 named!(control_packet_ping<BasePacket>, do_parse!(
-    tag!([0x00])
-    >> tag!([0x02])
+    tag!([0x00, 0x02])
     >> (BasePacket::ControlPacket {
         base_packet_type: BasePacketType::CONTROL,
         controltype: ControlPacketType::CONTROLTYPE_PING,
@@ -114,8 +124,7 @@ named!(control_packet_ping<BasePacket>, do_parse!(
 ));
 
 named!(control_packet_disco<BasePacket>, do_parse!(
-    tag!([0x00])
-    >> tag!([0x03])
+    tag!([0x00, 0x03])
     >> (BasePacket::ControlPacket {
         base_packet_type: BasePacketType::CONTROL,
         controltype: ControlPacketType::CONTROLTYPE_DISCO,
@@ -167,15 +176,33 @@ named!(base_packet<BasePacket>, alt!(
     reliable_packet
 ));
 
+named!(data_packet<DataPacket>, do_parse!(
+    tag!([0x00, 0x02])
+    >> max_client_serialization_version: be_u8
+    >> supp_compr_modes: be_u16
+    >> min_net_proto_version: be_u16
+    >> max_net_proto_version: be_u16
+    >> player_name: map!(length_bytes!(be_u16), |name| String::from_utf8(name.to_vec()).unwrap_or("".to_string()))
+    >> (DataPacket::TOSERVER_INIT {
+        max_client_serialization_version,
+        supp_compr_modes,
+        min_net_proto_version,
+        max_net_proto_version,
+        player_name,
+    })
+));
+
 named!(pub packet<Packet>, do_parse!(
     protocol_id: protocol_id
     >> sender_peer_id: sender_peer_id
     >> channel: channel
     >> base_packet: base_packet
+    >> data_packet: opt!(data_packet)
     >> (Packet {
         protocol_id,
         sender_peer_id,
         channel,
         base_packet,
+        data_packet,
     })
 ));
