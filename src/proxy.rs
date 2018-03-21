@@ -15,6 +15,46 @@ use packet::{DataPacket, packet};
 fn _debugf<F: Future<Item = (), Error = ()>>(_: F) {}
 fn _debugs<S: Stream<Item = (Bytes, SocketAddr), Error = ()>>(_: S) {}
 
+pub struct Client {
+    pub clientbound_tx: UnboundedSender<(BytesMut, SocketAddr)>,
+    pub serverbound_tx: UnboundedSender<(BytesMut, SocketAddr)>,
+    pub proxy_addr: SocketAddr,
+}
+
+impl Client {
+    pub fn new(source_addr: SocketAddr, remote_addr: SocketAddr, clientbound_tx: UnboundedSender<(BytesMut, SocketAddr)>) -> Client {
+        let random_addr = &"0.0.0.0:0".parse::<SocketAddr>().unwrap();
+        let proxy_socket = UdpSocket::bind(&random_addr).unwrap();
+        let proxy_addr = proxy_socket.local_addr().unwrap();
+
+        let (proxy_sink, proxy_stream) = UdpFramed::new(proxy_socket, BytesCodec::new()).split();
+        let (client_tx, client_rx) = unbounded::<(BytesMut, SocketAddr)>();
+
+        info!("New client: {}, creating temporary socket {} -> {}", source_addr, proxy_addr, remote_addr);
+
+        let server_to_client = clientbound_tx.clone().send_all(
+            proxy_stream.map(move |(msg, _temp_addr)| {
+                (msg, source_addr.clone())
+            }).map_err(|_| panic!())
+        ).map_err(|_| ()).map(|_| ());
+
+        let client_to_server = proxy_sink.send_all(
+            client_rx.map(move |(msg, _addr)| {
+                (msg.freeze(), remote_addr.clone())
+            }).map_err(|_| io::Error::new(io::ErrorKind::Other, "Test"))
+        ).map_err(|_| ()).map(|_| ());
+
+        tokio::spawn(server_to_client);
+        tokio::spawn(client_to_server);
+
+        Client {
+            serverbound_tx: client_tx.clone(),
+            clientbound_tx: clientbound_tx.clone(),
+            proxy_addr,
+        }
+    }
+}
+
 pub fn start(config: &Config) {
     let local_addr = config.host.parse::<SocketAddr>().unwrap();
 
@@ -23,7 +63,7 @@ pub fn start(config: &Config) {
     let socket = UdpSocket::bind(&local_addr).unwrap();
     let (sink, stream) = UdpFramed::new(socket, BytesCodec::new()).split();
 
-    let client_map : HashMap<SocketAddr, UnboundedSender<(BytesMut, SocketAddr)>> = HashMap::new();
+    let client_map : HashMap<SocketAddr, Client> = HashMap::new();
     let (main_tx, main_rx) = unbounded::<(BytesMut, SocketAddr)>();
 
     let remote_addr = config.servers["lobby"].address.parse::<SocketAddr>().unwrap();
@@ -43,42 +83,21 @@ pub fn start(config: &Config) {
                     Some(DataPacket::TOSERVER_CHAT_MESSAGE { message }) => {
                         info!("Peer {} said: {}", packet.sender_peer_id, message);
                     }
-                    _ =>  {}
+                    _ => {}
                 }
             }
             None => {}
         }
 
         if !hashmap.contains_key(&source_addr) {
-            let proxy_socket = UdpSocket::bind(&"0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
-            let proxy_addr = proxy_socket.local_addr().unwrap();
-            let (proxy_sink, proxy_stream) = UdpFramed::new(proxy_socket, BytesCodec::new()).split();
-            let (client_tx, client_rx) = unbounded::<(BytesMut, SocketAddr)>();
-
-            info!("New client: {}, creating temporary socket {} -> {}", source_addr, proxy_addr, remote_addr);
-
-            hashmap.insert(source_addr.clone(), client_tx.clone());
-
-            let server_to_client = main_tx.clone().send_all(
-                proxy_stream.map(move |(msg, _temp_addr)| {
-                    (msg, source_addr.clone())
-                }).map_err(|_| panic!())
-            ).map_err(|_| ()).map(|_| ());
-
-            let client_to_server = proxy_sink.send_all(
-                client_rx.map(move |(msg, _addr)| {
-                    (msg.freeze(), remote_addr.clone())
-                }).map_err(|_| io::Error::new(io::ErrorKind::Other, "Test"))
-            ).map_err(|_| ()).map(|_| ());
-
-            tokio::spawn(server_to_client);
-            tokio::spawn(client_to_server);
+            let client = Client::new(source_addr.clone(), remote_addr.clone(), main_tx.clone());
+            hashmap.insert(source_addr.clone(), client);
 
             Ok(hashmap)
         } else {
             {
-                let tx = hashmap.get(&source_addr).unwrap();
-                tx.unbounded_send((msg, source_addr.clone())).unwrap();
+                let client = hashmap.get(&source_addr).unwrap();
+                client.serverbound_tx.unbounded_send((msg, source_addr.clone())).unwrap();
             }
 
             Ok(hashmap)
