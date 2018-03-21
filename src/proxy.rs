@@ -19,6 +19,7 @@ pub struct Client {
     pub clientbound_tx: UnboundedSender<(BytesMut, SocketAddr)>,
     pub serverbound_tx: UnboundedSender<(BytesMut, SocketAddr)>,
     pub proxy_addr: SocketAddr,
+    pub player_name: String,
 }
 
 impl Client {
@@ -50,8 +51,13 @@ impl Client {
         Client {
             serverbound_tx: client_tx.clone(),
             clientbound_tx: clientbound_tx.clone(),
+            player_name: String::from(""),
             proxy_addr,
         }
+    }
+
+    pub fn set_player_name(&mut self, player_name: &String) {
+        self.player_name = player_name.clone();
     }
 }
 
@@ -74,21 +80,6 @@ pub fn start(config: &Config) {
             _ => (msg, None, source_addr),
         }
     }).fold(client_map, move |mut hashmap, (msg, packet, source_addr)| {
-        match packet {
-            Some(packet) => {
-                match packet.data_packet {
-                    Some(DataPacket::TOSERVER_INIT { player_name, ..}) => {
-                        info!("New player connected: {}", player_name);
-                    }
-                    Some(DataPacket::TOSERVER_CHAT_MESSAGE { message }) => {
-                        info!("Peer {} said: {}", packet.sender_peer_id, message);
-                    }
-                    _ => {}
-                }
-            }
-            None => {}
-        }
-
         if !hashmap.contains_key(&source_addr) {
             let client = Client::new(source_addr.clone(), remote_addr.clone(), main_tx.clone());
             hashmap.insert(source_addr.clone(), client);
@@ -96,7 +87,24 @@ pub fn start(config: &Config) {
             Ok(hashmap)
         } else {
             {
-                let client = hashmap.get(&source_addr).unwrap();
+                let client = hashmap.get_mut(&source_addr).unwrap();
+
+                match packet {
+                    Some(packet) => {
+                        match packet.data_packet {
+                            Some(DataPacket::TOSERVER_INIT { player_name, ..}) => {
+                                info!("New player connected: {}", player_name);
+                                client.set_player_name(&player_name);
+                            }
+                            Some(DataPacket::TOSERVER_CHAT_MESSAGE { message }) => {
+                                info!("[CHAT] <{}>: {}", client.player_name, message);
+                            }
+                            _ => {}
+                        }
+                    }
+                    None => {}
+                }
+
                 client.serverbound_tx.unbounded_send((msg, source_addr.clone())).unwrap();
             }
 
