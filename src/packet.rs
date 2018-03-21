@@ -84,6 +84,9 @@ pub enum DataPacket {
         min_net_proto_version: u16,
         max_net_proto_version: u16,
         player_name: String,
+    },
+    TOSERVER_CHAT_MESSAGE {
+        message: String,
     }
 }
 
@@ -176,7 +179,8 @@ named!(base_packet<BasePacket>, alt!(
     reliable_packet
 ));
 
-named!(data_packet<DataPacket>, do_parse!(
+
+named!(toserver_init<DataPacket>, do_parse!(
     tag!([0x00, 0x02])
     >> max_client_serialization_version: be_u8
     >> supp_compr_modes: be_u16
@@ -190,6 +194,19 @@ named!(data_packet<DataPacket>, do_parse!(
         max_net_proto_version,
         player_name,
     })
+));
+
+named!(toserver_chat_message<DataPacket>, do_parse!(
+    tag!([0x01, 0x00, 0x32])
+    >> message: map!(length_count!(be_u16, be_u16), |bytes| String::from_utf16(&bytes).unwrap_or("".to_string()))
+    >> (DataPacket::TOSERVER_CHAT_MESSAGE {
+        message,
+    })
+));
+
+named!(data_packet<DataPacket>, alt!(
+    toserver_init |
+    toserver_chat_message
 ));
 
 named!(pub packet<Packet>, do_parse!(

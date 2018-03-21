@@ -36,6 +36,9 @@ pub fn start(config: &Config) {
                         Some(DataPacket::TOSERVER_INIT { player_name, ..}) => {
                             info!("New player connected: {}", player_name);
                         }
+                        Some(DataPacket::TOSERVER_CHAT_MESSAGE { message }) => {
+                            info!("Peer {} said: {}", packet.sender_peer_id, message);
+                        }
                         _ => {}
                     }
                 },
