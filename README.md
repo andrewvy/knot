@@ -1,7 +1,13 @@
 knot
 ---
 
-A Minetest proxy designed to facilitate linking multiple servers together under a powerful API.
+A Minetest proxy designed to facilitate linking multiple servers together with a powerful lua plugin API.
+
+This provides a few use-cases:
+
+- Multi-dimensions through the use of multiple servers
+- Cross-server communication for plugins/mods.
+- And many more.
 
 ## Installation
 
