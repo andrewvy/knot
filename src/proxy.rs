@@ -28,22 +28,25 @@ pub fn start(config: &Config) {
 
     let remote_addr = config.servers["lobby"].address.parse::<SocketAddr>().unwrap();
 
-    let acceptor = stream.map_err(|_| ()).fold(client_map, move |mut hashmap, (msg, source_addr)| {
-        {
-            match packet(&msg).to_full_result() {
-                Ok(packet) => {
-                    match packet.data_packet {
-                        Some(DataPacket::TOSERVER_INIT { player_name, ..}) => {
-                            info!("New player connected: {}", player_name);
-                        }
-                        Some(DataPacket::TOSERVER_CHAT_MESSAGE { message }) => {
-                            info!("Peer {} said: {}", packet.sender_peer_id, message);
-                        }
-                        _ => {}
+    let acceptor = stream.map_err(|_| ()).map(|(msg, source_addr)| {
+        match packet(&msg).to_full_result() {
+            Ok(packet) => (msg, Some(packet), source_addr),
+            _ => (msg, None, source_addr),
+        }
+    }).fold(client_map, move |mut hashmap, (msg, packet, source_addr)| {
+        match packet {
+            Some(packet) => {
+                match packet.data_packet {
+                    Some(DataPacket::TOSERVER_INIT { player_name, ..}) => {
+                        info!("New player connected: {}", player_name);
                     }
-                },
-                _ => {}
+                    Some(DataPacket::TOSERVER_CHAT_MESSAGE { message }) => {
+                        info!("Peer {} said: {}", packet.sender_peer_id, message);
+                    }
+                    _ =>  {}
+                }
             }
+            None => {}
         }
 
         if !hashmap.contains_key(&source_addr) {
