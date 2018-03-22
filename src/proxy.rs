@@ -11,6 +11,7 @@ use bytes::{Bytes, BytesMut};
 
 use config::Config;
 use packet::{DataPacket, packet};
+use serializer;
 
 fn _debugf<F: Future<Item = (), Error = ()>>(_: F) {}
 fn _debugs<S: Stream<Item = (Bytes, SocketAddr), Error = ()>>(_: S) {}
@@ -92,20 +93,28 @@ pub fn start(config: &Config) {
                 match packet {
                     Some(packet) => {
                         match packet.data_packet {
-                            Some(DataPacket::TOSERVER_INIT { player_name, ..}) => {
-                                info!("New player connected: {}", player_name);
-                                client.set_player_name(&player_name);
+                            Some(DataPacket::TOSERVER_INIT(data_packet)) => {
+                                info!("New player connected: {}", &data_packet.player_name);
+                                client.set_player_name(&data_packet.player_name);
+                                client.serverbound_tx.unbounded_send((msg, source_addr.clone())).unwrap();
                             }
-                            Some(DataPacket::TOSERVER_CHAT_MESSAGE { message }) => {
-                                info!("[CHAT] <{}>: {}", client.player_name, message);
+                            Some(DataPacket::TOSERVER_CHAT_MESSAGE(ref data_packet)) => {
+                                info!("[CHAT] <{}>: {}", client.player_name, &data_packet.message);
+                                match serializer::serialize(&packet) {
+                                    Ok(bytes) => {
+                                        client.serverbound_tx.unbounded_send((BytesMut::from(bytes), source_addr.clone())).unwrap();
+                                    }
+                                    _ => client.serverbound_tx.unbounded_send((msg, source_addr.clone())).unwrap(),
+                                }
                             }
-                            _ => {}
+                            _ => {
+                                client.serverbound_tx.unbounded_send((msg, source_addr.clone())).unwrap();
+                            },
                         }
-                    }
-                    None => {}
-                }
 
-                client.serverbound_tx.unbounded_send((msg, source_addr.clone())).unwrap();
+                    }
+                    None => client.serverbound_tx.unbounded_send((msg, source_addr.clone())).unwrap(),
+                };
             }
 
             Ok(hashmap)
