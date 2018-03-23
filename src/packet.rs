@@ -72,6 +72,17 @@ pub enum BasePacket {
     }
 }
 
+impl BasePacket {
+    pub fn seqnum(&self) -> u16 {
+        match self {
+            &BasePacket::ControlPacket { seqnum, .. } => seqnum.unwrap_or(0),
+            &BasePacket::OriginalPacket { .. } => 0,
+            &BasePacket::SplitPacket { seqnum, .. } => seqnum,
+            &BasePacket::ReliablePacket { seqnum, .. } => seqnum,
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[allow(non_camel_case_types)]
 pub enum ControlPacketType {
@@ -94,6 +105,10 @@ impl From<u8> for ControlPacketType {
     }
 }
 
+// ---
+// Serverbound Packets
+// ---
+
 #[derive(Debug, Serialize)]
 pub struct ToServerInit {
     pub id: u16,
@@ -105,7 +120,17 @@ pub struct ToServerInit {
 }
 
 #[derive(Debug, Serialize)]
-pub struct ToServerChatMessage{
+pub struct ToServerChatMessage {
+    pub id: u16,
+    pub message: String,
+}
+
+// ---
+// Clientbound Packets
+// ---
+
+#[derive(Debug, Serialize)]
+pub struct ToClientChatMessageOld {
     pub id: u16,
     pub message: String,
 }
@@ -113,9 +138,17 @@ pub struct ToServerChatMessage{
 #[derive(Debug, Serialize)]
 #[allow(non_camel_case_types)]
 pub enum DataPacket {
+    // Serverbound
     TOSERVER_INIT(ToServerInit),
     TOSERVER_CHAT_MESSAGE(ToServerChatMessage),
+
+    // Clientbound
+    TOCLIENT_CHAT_MESSAGE_OLD(ToClientChatMessageOld),
 }
+
+// ---
+// Base Packet Fields
+// ---
 
 named!(protocol_id<u32>, call!(be_u32));
 named!(sender_peer_id<u16>, call!(be_u16));
@@ -219,6 +252,9 @@ named!(base_packet<BasePacket>, alt!(
     reliable_packet
 ));
 
+// ---
+// Serverbound Packets
+// ---
 
 named!(toserver_init<DataPacket>, do_parse!(
     tag!([0x00, 0x02])
@@ -246,17 +282,53 @@ named!(toserver_chat_message<DataPacket>, do_parse!(
     }))
 ));
 
-named!(data_packet<DataPacket>, alt!(
+named!(server_data_packet<DataPacket>, alt!(
     toserver_init |
     toserver_chat_message
 ));
 
-named!(pub packet<Packet>, do_parse!(
+// ---
+// Clientbound Packets
+// ----
+
+named!(toclient_chat_message_old<DataPacket>, do_parse!(
+    tag!([0x00, 0x30])
+    >> message: map!(length_count!(be_u16, be_u16), |bytes| String::from_utf16(&bytes).unwrap_or("".to_string()))
+    >> (DataPacket::TOCLIENT_CHAT_MESSAGE_OLD(ToClientChatMessageOld {
+        id: 0x30,
+        message,
+    }))
+));
+
+named!(client_data_packet<DataPacket>, alt!(
+    toclient_chat_message_old
+));
+
+// ---
+// Public Deserializers
+// ---
+
+named!(pub deserialize_serverbound<Packet>, do_parse!(
     protocol_id: protocol_id
     >> sender_peer_id: sender_peer_id
     >> channel: channel
     >> base_packet: base_packet
-    >> data_packet: opt!(data_packet)
+    >> data_packet: opt!(server_data_packet)
+    >> (Packet {
+        protocol_id,
+        sender_peer_id,
+        channel,
+        base_packet,
+        data_packet,
+    })
+));
+
+named!(pub deserialize_clientbound<Packet>, do_parse!(
+    protocol_id: protocol_id
+    >> sender_peer_id: sender_peer_id
+    >> channel: channel
+    >> base_packet: base_packet
+    >> data_packet: opt!(client_data_packet)
     >> (Packet {
         protocol_id,
         sender_peer_id,

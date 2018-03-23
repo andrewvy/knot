@@ -10,7 +10,7 @@ use tokio_io::codec::BytesCodec;
 use bytes::{Bytes, BytesMut};
 
 use config::Config;
-use packet::{DataPacket, packet};
+use packet::{self, DataPacket, deserialize_serverbound};
 use serializer;
 
 fn _debugf<F: Future<Item = (), Error = ()>>(_: F) {}
@@ -76,7 +76,7 @@ pub fn start(config: &Config) {
     let remote_addr = config.servers["lobby"].address.parse::<SocketAddr>().unwrap();
 
     let acceptor = stream.map_err(|_| ()).map(|(msg, source_addr)| {
-        match packet(&msg).to_full_result() {
+        match deserialize_serverbound(&msg).to_full_result() {
             Ok(packet) => (msg, Some(packet), source_addr),
             _ => (msg, None, source_addr),
         }
@@ -100,12 +100,51 @@ pub fn start(config: &Config) {
                             }
                             Some(DataPacket::TOSERVER_CHAT_MESSAGE(ref data_packet)) => {
                                 info!("[CHAT] <{}>: {}", client.player_name, &data_packet.message);
-                                match serializer::serialize(&packet) {
+
+                                let ack_packet = packet::Packet {
+                                    protocol_id: packet.protocol_id,
+                                    sender_peer_id: 1,
+                                    channel: packet.channel,
+                                    base_packet: packet::BasePacket::ControlPacket {
+                                        base_packet_id: packet::BasePacketType::CONTROL as u8,
+                                        base_packet_type: packet::BasePacketType::CONTROL,
+                                        controltype_id: packet::ControlPacketType::CONTROLTYPE_ACK as u8,
+                                        controltype: packet::ControlPacketType::CONTROLTYPE_ACK,
+                                        seqnum: Some(packet.base_packet.seqnum()),
+                                        peer_id_new: None,
+                                    },
+                                    data_packet: None,
+                                };
+
+                                match serializer::serialize(&ack_packet) {
                                     Ok(bytes) => {
-                                        client.serverbound_tx.unbounded_send((BytesMut::from(bytes), source_addr.clone())).unwrap();
+                                        client.clientbound_tx.unbounded_send((BytesMut::from(bytes), source_addr.clone())).unwrap();
+                                    }
+                                    _ => {},
+                                }
+
+                                let clientbound_packet = packet::Packet {
+                                    protocol_id: packet.protocol_id,
+                                    sender_peer_id: 1,
+                                    channel: packet.channel,
+                                    base_packet: packet::BasePacket::OriginalPacket {
+                                        base_packet_id: packet::BasePacketType::ORIGINAL as u8,
+                                        base_packet_type: packet::BasePacketType::ORIGINAL,
+                                    },
+                                    data_packet: Some(DataPacket::TOCLIENT_CHAT_MESSAGE_OLD(packet::ToClientChatMessageOld {
+                                        id: 0x30,
+                                        message: format!("[proxy] <{}> {}", &client.player_name, &data_packet.message),
+                                    })),
+                                };
+
+                                match serializer::serialize(&clientbound_packet) {
+                                    Ok(bytes) => {
+                                        client.clientbound_tx.unbounded_send((BytesMut::from(bytes), source_addr.clone())).unwrap();
                                     }
                                     _ => client.serverbound_tx.unbounded_send((msg, source_addr.clone())).unwrap(),
                                 }
+
+                                // client.serverbound_tx.unbounded_send((msg, source_addr.clone())).unwrap();
                             }
                             _ => {
                                 client.serverbound_tx.unbounded_send((msg, source_addr.clone())).unwrap();
@@ -122,7 +161,10 @@ pub fn start(config: &Config) {
     })
     .map(|_| ());
 
-    let main_rx = main_rx.map(|(msg, addr)| (msg.freeze(), addr)).map_err(|_| io::Error::new(io::ErrorKind::Other, "Test"));
+    let main_rx = main_rx.map(|(msg, addr)| {
+        (msg.freeze(), addr)
+    }).map_err(|_| io::Error::new(io::ErrorKind::Other, "Test"));
+
     let downstream = sink.send_all(main_rx).map_err(|_| ()).map(|_| ());
 
     tokio::run(
